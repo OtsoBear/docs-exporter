@@ -205,6 +205,11 @@ class DocsExporter:
 def index():
     return render_template('index.html')
 
+@app.route('/scanning')
+def scanning():
+    url = request.args.get('url', '')
+    return render_template('scanning.html', url=url)
+
 @app.route('/scan', methods=['POST'])
 def scan():
     url = request.form.get('url', '').strip()
