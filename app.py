@@ -14,6 +14,7 @@ class DocsExporter:
     def __init__(self, base_url):
         self.base_url = base_url.rstrip('/')
         self.domain = urlparse(base_url).netloc
+        self.base_path = urlparse(base_url).path.rstrip('/')
         
     def get_navigation_structure(self):
         """Extract navigation structure from the main docs page"""
@@ -74,6 +75,15 @@ class DocsExporter:
     async def fetch_markdown_content_async(self, session, url):
         """Fetch markdown content by appending .md to the URL"""
         try:
+            # Check if this is an external URL
+            if self.is_external_url(url):
+                # Validate external URL before proceeding
+                is_valid, result = await self.validate_external_markdown(session, url)
+                if not is_valid:
+                    return None, f"External URL rejected: {result}"
+                return result, None
+            
+            # For internal URLs, use the original logic
             # Convert docs URL to markdown URL
             # If URL ends with '/', add '.md' directly
             # If URL doesn't end with '/', add '/.md'
@@ -138,6 +148,115 @@ class DocsExporter:
             content = content.replace(f"__INLINE_CODE_{i}__", inline_code)
         
         return content
+    
+    def is_external_url(self, url):
+        """Check if URL is outside the main documentation base"""
+        parsed_url = urlparse(url)
+        
+        # Different domain
+        if parsed_url.netloc != self.domain:
+            return True
+            
+        # Same domain but different base path
+        url_path = parsed_url.path.rstrip('/')
+        if not url_path.startswith(self.base_path):
+            return True
+            
+        return False
+    
+    async def validate_external_markdown(self, session, url):
+        """Validate if an external URL contains proper markdown documentation"""
+        try:
+            # Fetch both regular and .md versions
+            regular_url = url
+            md_url = url + '/.md' if url.endswith('/') else url + '/.md'
+            
+            # Fetch both versions concurrently
+            async with session.get(regular_url, timeout=10) as regular_response:
+                if regular_response.status != 200:
+                    return False, "Page not accessible"
+                regular_content = await regular_response.text()
+            
+            async with session.get(md_url, timeout=10) as md_response:
+                if md_response.status != 200:
+                    return False, "No markdown version available"
+                md_content = await md_response.text()
+            
+            # Check if there's a meaningful difference
+            if len(md_content.strip()) == 0:
+                return False, "Empty markdown content"
+                
+            # Simple check - markdown should be significantly different from HTML
+            if abs(len(md_content) - len(regular_content)) < 100:
+                return False, "No significant difference between HTML and markdown"
+            
+            # Check if content has markdown characteristics
+            if not self.has_markdown_characteristics(md_content):
+                return False, "Content doesn't appear to be documentation"
+                
+            return True, md_content
+            
+        except asyncio.TimeoutError:
+            return False, "Timeout accessing external URL"
+        except Exception as e:
+            return False, f"Error validating external URL: {str(e)}"
+    
+    def has_markdown_characteristics(self, content):
+        """Check if content has typical markdown documentation characteristics"""
+        if not content or len(content.strip()) < 100:
+            return False
+            
+        # Look for markdown indicators
+        markdown_indicators = 0
+        
+        # Headers
+        if re.search(r'^#+\s', content, re.MULTILINE):
+            markdown_indicators += 1
+            
+        # Code blocks
+        if re.search(r'```[\s\S]*?```', content):
+            markdown_indicators += 1
+            
+        # Inline code
+        if re.search(r'`[^`\n]+`', content):
+            markdown_indicators += 1
+            
+        # Links
+        if re.search(r'\[.*?\]\(.*?\)', content):
+            markdown_indicators += 1
+            
+        # Lists
+        if re.search(r'^[\s]*[-*+]\s', content, re.MULTILINE):
+            markdown_indicators += 1
+            
+        # Bold/italic
+        if re.search(r'\*\*.*?\*\*|\*.*?\*', content):
+            markdown_indicators += 1
+        
+        # Check for non-documentation indicators (privacy policies, legal, etc.)
+        non_doc_indicators = [
+            r'privacy policy',
+            r'terms of service',
+            r'cookie policy',
+            r'legal',
+            r'gdpr',
+            r'data protection',
+            r'compliance',
+            r'effective date',
+            r'last updated',
+            r'© \d{4}',  # copyright
+        ]
+        
+        content_lower = content.lower()
+        non_doc_count = sum(1 for pattern in non_doc_indicators 
+                           if re.search(pattern, content_lower))
+        
+        # If it has many non-doc indicators and few markdown indicators, reject
+        if non_doc_count >= 3 and markdown_indicators < 3:
+            return False
+            
+        # Need at least 2 markdown indicators for documentation
+        return markdown_indicators >= 2
     
     async def export_selected_pages_async(self, selected_urls, compress_links=False):
         """Export selected pages to a combined markdown file"""
