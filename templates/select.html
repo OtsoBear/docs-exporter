@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Pages to Export</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 1rem;
+            overflow-x: hidden;
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 300;
+            margin-bottom: 1rem;
+            text-align: center;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+        
+        button, .checkbox-label {
+            padding: 0.5rem 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        button:hover, .checkbox-label:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .selected-count {
+            background: rgba(100, 255, 100, 0.1);
+            border-color: rgba(100, 255, 100, 0.3);
+        }
+        
+        .group {
+            margin-bottom: 0.5rem;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .group-header {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.5rem 1rem;
+            font-weight: 400;
+            font-size: 0.9rem;
+            opacity: 0.9;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+        
+        .group-header:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        
+        .toggle-btn {
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.7);
+            padding: 0.2rem 0.5rem;
+            font-size: 0.7rem;
+        }
+        
+        .group-content {
+            padding: 0.5rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .page-item {
+            margin-bottom: 0.2rem;
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.02);
+            font-size: 0.8rem;
+            transition: background 0.2s ease;
+        }
+        
+        .page-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .page-item label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            width: 100%;
+        }
+        
+        input[type="checkbox"] {
+            margin-right: 0.5rem;
+            transform: scale(0.9);
+        }
+        
+        small {
+            color: rgba(255, 255, 255, 0.4);
+            margin-left: auto;
+            font-size: 0.7rem;
+        }
+
+        /* Gravity Animation Classes */
+        .falling {
+            animation: gravity-fall var(--duration, 2s) ease-in forwards;
+            transform-origin: center;
+        }
+
+        @keyframes gravity-fall {
+            0% {
+                transform: translateY(0) rotate(0deg);
+                opacity: 1;
+            }
+            20% {
+                transform: translateY(10px) rotate(var(--rotation, 15deg));
+            }
+            100% {
+                transform: translateY(120vh) rotate(calc(var(--rotation, 15deg) * 8));
+                opacity: 0;
+            }
+        }
+
+        /* Loading Indicator */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #fff;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <h1>Select Pages to Export</h1>
+    
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Exporting documentation...</div>
+        </div>
+    </div>
+    
+    <form method="POST" action="{{ url_for('export') }}" id="exportForm">
+        <input type="hidden" name="base_url" value="{{ base_url }}">
+        
+        <div class="controls" id="controls">
+            <button type="button" onclick="selectAll()">All</button>
+            <button type="button" onclick="selectNone()">None</button>
+            <div class="selected-count">
+                <span id="count">0</span> selected
+            </div>
+            <label class="checkbox-label">
+                <input type="checkbox" name="compress_links">
+                Compress Links
+            </label>
+            <button type="submit" id="exportBtn">Export</button>
+        </div>
+        
+        <div id="groupsContainer">
+        {% for group in nav_structure %}
+        {% set outer_loop = loop.index %}
+        <div class="group">
+            <div class="group-header">
+                {{ group.group }}
+                <button type="button" onclick="toggleGroup('group-{{ loop.index }}')"
+                        class="toggle-btn">
+                    Toggle
+                </button>
+            </div>
+            <div class="group-content">
+                {% for page in group.pages %}
+                <div class="page-item">
+                    <label>
+                        <input type="checkbox" name="selected_pages" value="{{ page.url }}" 
+                               class="page-checkbox group-{{ outer_loop }}" 
+                               onchange="updateCount()">
+                        {{ page.title }}
+                        <small>{{ page.path }}</small>
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </form>
+    
+    <script>
+        function updateCount() {
+            const checked = document.querySelectorAll('input[name="selected_pages"]:checked').length;
+            document.getElementById('count').textContent = checked;
+        }
+        
+        function selectAll() {
+            const checkboxes = document.querySelectorAll('input[name="selected_pages"]');
+            checkboxes.forEach(cb => cb.checked = true);
+            updateCount();
+        }
+        
+        function selectNone() {
+            const checkboxes = document.querySelectorAll('input[name="selected_pages"]');
+            checkboxes.forEach(cb => cb.checked = false);
+            updateCount();
+        }
+        
+        function toggleGroup(groupClass) {
+            const checkboxes = document.querySelectorAll('.' + groupClass);
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => cb.checked = !allChecked);
+            updateCount();
+        }
+        
+        // Gravity animation function
+        function triggerGravityAnimation() {
+            const elements = [
+                ...document.querySelectorAll('.group'),
+                document.querySelector('#controls')
+            ];
+            
+            elements.forEach((element, index) => {
+                if (element) {
+                    const rotation = (Math.random() - 0.5) * 60; // Random rotation between -30 and 30 degrees
+                    const duration = 1.5 + Math.random() * 1; // Random duration between 1.5s and 2.5s
+                    const delay = index * 0.1; // Staggered start times
+                    
+                    element.style.setProperty('--rotation', rotation + 'deg');
+                    element.style.setProperty('--duration', duration + 's');
+                    element.style.animationDelay = delay + 's';
+                    element.classList.add('falling');
+                }
+            });
+        }
+        
+        // Export form handling
+        document.getElementById('exportForm').addEventListener('submit', function(e) {
+            const checked = document.querySelectorAll('input[name="selected_pages"]:checked').length;
+            if (checked === 0) {
+                e.preventDefault();
+                alert('Please select at least one page to export.');
+                return;
+            }
+            
+            // Trigger gravity animation
+            triggerGravityAnimation();
+            
+            // Show loading indicator after 1 second (after animation completes)
+            setTimeout(() => {
+                document.getElementById('loadingOverlay').style.display = 'flex';
+            }, 1000);
+        });
+        
+        // Initialize count
+        updateCount();
+    </script>
+</body>
+</html>

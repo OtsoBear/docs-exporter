@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Export Result</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 300;
+            margin-bottom: 1rem;
+            text-align: center;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        button, a {
+            padding: 0.5rem 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 0.8rem;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        
+        button:hover, a:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .content-area {
+            background: rgba(255, 255, 255, 0.02);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            height: 80vh;
+            overflow: hidden;
+        }
+        
+        textarea {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            border: none;
+            padding: 1rem;
+            color: #fff;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            resize: none;
+            outline: none;
+        }
+        
+        textarea::selection {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .alert {
+            background: rgba(255, 100, 100, 0.1);
+            border: 1px solid rgba(255, 100, 100, 0.3);
+            border-radius: 8px;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+        }
+        
+        .success {
+            background: rgba(100, 255, 100, 0.1);
+            border-color: rgba(100, 255, 100, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <h1>Export Result</h1>
+    
+    {% if errors %}
+        {% for error in errors %}
+            <div class="alert">{{ error }}</div>
+        {% endfor %}
+    {% endif %}
+    
+    {% if content %}
+        <div class="alert success">
+            Ready to copy!
+        </div>
+        
+        <div class="controls">
+            <button onclick="copyToClipboard()">Copy</button>
+            <button onclick="downloadFile()">Download</button>
+            <a href="{{ url_for('index') }}">New Export</a>
+        </div>
+        
+        <div class="content-area">
+            <textarea id="content" spellcheck="false">{{ content }}</textarea>
+        </div>
+    {% else %}
+        <div class="alert">
+            No content exported.
+        </div>
+        <div class="controls">
+            <a href="{{ url_for('index') }}">Try Again</a>
+        </div>
+    {% endif %}
+    
+    <script>
+        function copyToClipboard() {
+            const textarea = document.getElementById('content');
+            textarea.select();
+            textarea.setSelectionRange(0, 99999); // For mobile devices
+            
+            try {
+                document.execCommand('copy');
+                alert('Content copied to clipboard!');
+            } catch (err) {
+                // Fallback to newer API
+                navigator.clipboard.writeText(textarea.value).then(() => {
+                    alert('Content copied to clipboard!');
+                }).catch(() => {
+                    alert('Failed to copy content. Please select all (Cmd+A) and copy manually.');
+                });
+            }
+        }
+        
+        function downloadFile() {
+            const content = document.getElementById('content').value;
+            const blob = new Blob([content], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'exported-docs.md';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // Auto-focus and select all on load for easy copying
+        document.addEventListener('DOMContentLoaded', function() {
+            const textarea = document.getElementById('content');
+            textarea.focus();
+        });
+    </script>
+</body>
+</html>

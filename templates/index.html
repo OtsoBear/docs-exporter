@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation Exporter</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding-top: 10vh;
+        }
+        
+        h1 {
+            font-size: 2rem;
+            font-weight: 300;
+            margin-bottom: 3rem;
+            text-align: center;
+            opacity: 0.9;
+        }
+        
+        .form-group {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        input[type="url"] {
+            width: 100%;
+            padding: 1rem;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        input[type="url"]:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+        
+        input[type="url"]::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        button {
+            width: 100%;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        button:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .alert {
+            background: rgba(255, 100, 100, 0.1);
+            border: 1px solid rgba(255, 100, 100, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .example {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+        }
+        
+        .info {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+        
+        .info h3 {
+            font-weight: 400;
+            margin-bottom: 1rem;
+            opacity: 0.9;
+        }
+        
+        .info ol {
+            padding-left: 1.2rem;
+        }
+        
+        .info li {
+            margin-bottom: 0.5rem;
+            opacity: 0.8;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Documentation Exporter</h1>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="form-group">
+            <form method="POST" action="{{ url_for('scan') }}">
+                <input type="url" name="url" placeholder="https://www.tensorzero.com/docs" required>
+                <div class="example">Enter any Mintlify documentation URL</div>
+                <br>
+                <button type="submit">Scan Documentation</button>
+            </form>
+        </div>
+        
+        <div class="info">
+            <h3>How it works</h3>
+            <ol>
+                <li>Scans navigation structure</li>
+                <li>Select pages to export</li>
+                <li>Get combined markdown</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>
