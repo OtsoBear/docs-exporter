@@ -703,15 +703,16 @@
         // Gravity animation function
         function triggerGravityAnimation() {
             const elements = [
+                document.querySelector('h1'), // Add the title
                 ...document.querySelectorAll('.group'),
                 document.querySelector('#controls')
             ];
             
             elements.forEach((element, index) => {
                 if (element) {
-                    const rotation = (Math.random() - 0.5) * 60; // Random rotation between -30 and 30 degrees
-                    const duration = 1.5 + Math.random() * 1; // Random duration between 1.5s and 2.5s
-                    const delay = index * 0.1; // Staggered start times
+                    const rotation = (Math.random() - 0.5) * 20; // Random rotation between -10 and 10 degrees (less dramatic)
+                    const duration = 0.8 + Math.random() * 0.4; // Random duration between 0.8s and 1.2s (faster)
+                    const delay = index * 0.05; // Staggered start times (tighter timing)
                     
                     element.style.setProperty('--rotation', rotation + 'deg');
                     element.style.setProperty('--duration', duration + 's');
@@ -733,10 +734,22 @@
             // Trigger gravity animation
             triggerGravityAnimation();
             
-            // Show loading indicator after 1 second (after animation completes)
-            setTimeout(() => {
-                document.getElementById('loadingOverlay').style.display = 'flex';
-            }, 1000);
+            // Show loading indicator when title animation completes (title is first element, so it has the shortest delay)
+            const titleElement = document.querySelector('h1');
+            if (titleElement) {
+                const titleDuration = parseFloat(titleElement.style.getPropertyValue('--duration')) || 1;
+                const titleDelay = parseFloat(titleElement.style.animationDelay) || 0;
+                const totalTitleTime = (titleDuration + titleDelay) * 1000; // Convert to milliseconds
+                
+                setTimeout(() => {
+                    document.getElementById('loadingOverlay').style.display = 'flex';
+                }, totalTitleTime);
+            } else {
+                // Fallback if title not found
+                setTimeout(() => {
+                    document.getElementById('loadingOverlay').style.display = 'flex';
+                }, 850); // Approximate time for title to reach bottom
+            }
         });
         
         // Initialize count
