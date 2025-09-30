@@ -1,20 +1,105 @@
 import requests
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, Response, session
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import re
 import time
 import asyncio
 import aiohttp
+import json
+import threading
+import uuid
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'
 
+# Global progress tracking
+progress_data = {}
+progress_lock = threading.Lock()
+
 class DocsExporter:
-    def __init__(self, base_url):
-        self.base_url = base_url.rstrip('/')
-        self.domain = urlparse(base_url).netloc
-        self.base_path = urlparse(base_url).path.rstrip('/')
+    def __init__(self, base_url, max_concurrent_requests=15, delay_between_requests=0.1):
+        self.original_url = base_url.rstrip('/')
+        self.base_url, self.domain, self.base_path = self._determine_optimal_base_url(base_url)
+        self.max_concurrent_requests = max_concurrent_requests
+        self.delay_between_requests = delay_between_requests
+        self.semaphore = None  # Will be initialized in async context
+        self.progress_callback = None  # For progress updates
+        self.adaptive_delay = self.delay_between_requests  # Dynamic delay adjustment
+        
+    def set_progress_callback(self, callback):
+        """Set callback function for progress updates"""
+        self.progress_callback = callback
+        self.adaptive_delay = self.delay_between_requests  # Dynamic delay adjustment
+        
+    def _determine_optimal_base_url(self, input_url):
+        """Intelligently determine the best base URL for documentation"""
+        input_url = input_url.rstrip('/')
+        parsed = urlparse(input_url)
+        domain = parsed.netloc
+        path = parsed.path.rstrip('/')
+        
+        # Generate candidate base URLs
+        candidates = []
+        path_parts = [part for part in path.split('/') if part]
+        
+        # Priority 1: Look for 'docs' in the path and use that level
+        docs_index = -1
+        for i, part in enumerate(path_parts):
+            if 'docs' in part.lower():
+                docs_index = i
+                break
+                
+        if docs_index >= 0:
+            # Use the docs level
+            docs_path = '/' + '/'.join(path_parts[:docs_index + 1])
+            candidates.append(f"{parsed.scheme}://{domain}{docs_path}")
+            
+        # Priority 2: Try different depths
+        for depth in range(len(path_parts), 0, -1):
+            candidate_path = '/' + '/'.join(path_parts[:depth])
+            candidate_url = f"{parsed.scheme}://{domain}{candidate_path}"
+            if candidate_url not in candidates:
+                candidates.append(candidate_url)
+        
+        # Priority 3: Use the original input URL
+        if input_url not in candidates:
+            candidates.append(input_url)
+            
+        # Test candidates to find the best one
+        for candidate in candidates:
+            try:
+                response = requests.get(candidate, timeout=5)
+                if response.status_code == 200:
+                    # Check if it looks like a docs site
+                    if self._looks_like_docs_site(response.text):
+                        candidate_parsed = urlparse(candidate)
+                        return candidate, candidate_parsed.netloc, candidate_parsed.path.rstrip('/')
+            except:
+                continue
+                
+        # Fallback to the original URL
+        return input_url, domain, path
+    
+    def _looks_like_docs_site(self, html_content):
+        """Check if the HTML content looks like a documentation site"""
+        content_lower = html_content.lower()
+        
+        # Look for documentation indicators
+        doc_indicators = [
+            'documentation',
+            'docs',
+            'api reference',
+            'getting started',
+            'guide',
+            'tutorial',
+            'sidebar',
+            'navigation',
+            'toc',
+            'table of contents'
+        ]
+        
+        return any(indicator in content_lower for indicator in doc_indicators)
         
     def get_navigation_structure(self):
         """Extract navigation structure from the main docs page"""
@@ -72,36 +157,64 @@ class DocsExporter:
         
         return pages, None
     
-    async def fetch_markdown_content_async(self, session, url):
-        """Fetch markdown content by appending .md to the URL"""
-        try:
-            # Check if this is an external URL
-            if self.is_external_url(url):
-                # Validate external URL before proceeding
-                is_valid, result = await self.validate_external_markdown(session, url)
-                if not is_valid:
-                    return None, f"External URL rejected: {result}"
-                return result, None
+    async def fetch_markdown_content_async(self, session, url, max_retries=3):
+        """Fetch markdown content with adaptive rate limiting for maximum speed"""
+        async with self.semaphore:  # Limit concurrent requests
+            # Use adaptive delay that increases only when needed
+            if self.adaptive_delay > self.delay_between_requests:
+                await asyncio.sleep(self.adaptive_delay)
             
-            # For internal URLs, use the original logic
-            # Convert docs URL to markdown URL
-            # If URL ends with '/', add '.md' directly
-            # If URL doesn't end with '/', add '/.md'
-            if url.endswith('/'):
-                md_url = url + '.md'
-            else:
-                md_url = url + '/.md'
+            for attempt in range(max_retries):
+                try:
+                    # Check if this is an external URL
+                    if self.is_external_url(url):
+                        # Validate external URL before proceeding
+                        is_valid, result = await self.validate_external_markdown(session, url)
+                        if not is_valid:
+                            return None, f"External URL rejected: {result}"
+                        return result, None
+                    
+                    # For internal URLs, use the original logic
+                    if url.endswith('/'):
+                        md_url = url + '.md'
+                    else:
+                        md_url = url + '/.md'
+                    
+                    async with session.get(md_url, timeout=10) as response:
+                        if response.status == 404:
+                            return None, "Pages that don't exist"
+                        
+                        if response.status == 429:  # Rate limited
+                            # Increase adaptive delay for all future requests
+                            self.adaptive_delay = min(self.adaptive_delay * 2, 2.0)
+                            if attempt < max_retries - 1:
+                                wait_time = (2 ** attempt) * 1  # Faster backoff: 1, 2, 4 seconds
+                                await asyncio.sleep(wait_time)
+                                continue
+                            return None, "Rate limiting from the server"
+                        
+                        response.raise_for_status()
+                        content = await response.text()
+                        
+                        # Success - gradually reduce adaptive delay
+                        if self.adaptive_delay > self.delay_between_requests:
+                            self.adaptive_delay = max(self.adaptive_delay * 0.9, self.delay_between_requests)
+                        
+                        return content, None
+                        
+                except asyncio.TimeoutError:
+                    if attempt < max_retries - 1:
+                        wait_time = 0.5 * (attempt + 1)  # Fast timeout retry: 0.5, 1, 1.5 seconds
+                        await asyncio.sleep(wait_time)
+                        continue
+                    return None, "Timeout accessing page"
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(0.2)  # Very fast retry for other errors
+                        continue
+                    return None, "Pages that can't be accessed"
             
-            async with session.get(md_url, timeout=10) as response:
-                if response.status == 404:
-                    return None, "Pages that don't exist"
-                response.raise_for_status()
-                content = await response.text()
-                return content, None
-        except asyncio.TimeoutError:
-            return None, "Rate limiting from the server"
-        except:
-            return None, "Pages that can't be accessed"
+            return None, "Pages that can't be accessed after retries"
     
     def compress_content(self, content):
         """Compress content by removing verbose image markup and shortening URLs"""
@@ -167,17 +280,27 @@ class DocsExporter:
     async def validate_external_markdown(self, session, url):
         """Validate if an external URL contains proper markdown documentation"""
         try:
-            # Fetch both regular and .md versions
+            # Fetch both regular and .md versions with delays
             regular_url = url
             md_url = url + '/.md' if url.endswith('/') else url + '/.md'
             
-            # Fetch both versions concurrently
-            async with session.get(regular_url, timeout=10) as regular_response:
+            # Fetch regular version first
+            async with session.get(regular_url, timeout=15) as regular_response:
+                if regular_response.status == 429:
+                    await asyncio.sleep(2)
+                    return False, "Rate limited"
                 if regular_response.status != 200:
                     return False, "Page not accessible"
                 regular_content = await regular_response.text()
             
-            async with session.get(md_url, timeout=10) as md_response:
+            # Add delay before second request
+            await asyncio.sleep(self.delay_between_requests)
+            
+            # Fetch markdown version
+            async with session.get(md_url, timeout=15) as md_response:
+                if md_response.status == 429:
+                    await asyncio.sleep(2)
+                    return False, "Rate limited"
                 if md_response.status != 200:
                     return False, "No markdown version available"
                 md_content = await md_response.text()
@@ -188,7 +311,7 @@ class DocsExporter:
                 
             # Simple check - markdown should be significantly different from HTML
             if abs(len(md_content) - len(regular_content)) < 100:
-                return False, "No significant difference between HTML and markdown"
+                return False, "No markdown version found"
             
             # Check if content has markdown characteristics
             if not self.has_markdown_characteristics(md_content):
@@ -259,20 +382,35 @@ class DocsExporter:
         return markdown_indicators >= 2
     
     async def export_selected_pages_async(self, selected_urls, compress_links=False):
-        """Export selected pages to a combined markdown file"""
+        """Export selected pages to a combined markdown file with maximum speed and progress tracking"""
         combined_content = []
         errors = []
+        rejections = []  # Track external URL rejections separately
+        
+        # Initialize semaphore for rate limiting
+        self.semaphore = asyncio.Semaphore(self.max_concurrent_requests)
         
         # Get navigation structure to maintain hierarchy
         nav_structure, error = self.get_navigation_structure()
         if error:
-            return None, [error]
+            return None, [error], []
         
-        async with aiohttp.ClientSession() as session:
-            tasks = []
+        # Create session with optimized settings for speed
+        connector = aiohttp.TCPConnector(
+            limit=100,  # High connection pool
+            limit_per_host=self.max_concurrent_requests,
+            ttl_dns_cache=300,
+            use_dns_cache=True,
+            enable_cleanup_closed=True,
+            keepalive_timeout=30,
+        )
+        
+        timeout = aiohttp.ClientTimeout(total=30, connect=5)
+        
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             url_to_info = {}
             
-            # Prepare tasks for concurrent fetching
+            # Prepare URL info mapping
             for group in nav_structure:
                 for page in group['pages']:
                     if page['url'] in selected_urls:
@@ -280,15 +418,42 @@ class DocsExporter:
                             'group': group['group'],
                             'title': page['title']
                         }
-                        task = self.fetch_markdown_content_async(session, page['url'])
-                        tasks.append((page['url'], task))
             
-            # Execute all requests concurrently
-            results = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
+            # Process ALL requests concurrently for maximum speed (no batching)
+            selected_pages = [(url, url_to_info[url]) for url in selected_urls if url in url_to_info]
+            total_pages = len(selected_pages)
+            completed_count = 0
+            
+            # Update progress callback
+            if self.progress_callback:
+                self.progress_callback(0, total_pages, "Starting export...")
+            
+            # Create all tasks at once for maximum parallelism
+            async def fetch_with_progress(url, info):
+                nonlocal completed_count
+                result = await self.fetch_markdown_content_async(session, url)
+                completed_count += 1
+                
+                # Update progress
+                if self.progress_callback:
+                    progress_msg = f"Completed {info['title']}"
+                    self.progress_callback(completed_count, total_pages, progress_msg)
+                
+                return url, result
+            
+            # Execute ALL requests concurrently
+            tasks = [fetch_with_progress(url, info) for url, info in selected_pages]
+            all_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Convert results to dictionary
+            url_results = {}
+            for result in all_results:
+                if isinstance(result, Exception):
+                    continue
+                url, (content, error) = result
+                url_results[url] = (content, error)
             
             # Process results maintaining hierarchy
-            url_results = dict(zip([url for url, _ in tasks], results))
-            
             for group in nav_structure:
                 group_added = False
                 
@@ -304,13 +469,21 @@ class DocsExporter:
                         
                         # Get result
                         result = url_results.get(page['url'])
-                        if isinstance(result, Exception):
-                            errors.append(f"{page['title']}: Pages that can't be accessed")
+                        if not result:
+                            errors.append(f"{page['title']}: No result")
                             continue
                         
                         content, error = result
                         if error:
-                            errors.append(f"{page['title']}: {error}")
+                            # Check if it's an external URL rejection
+                            if error.startswith("External URL rejected:"):
+                                rejections.append({
+                                    'title': page['title'],
+                                    'reason': error.replace("External URL rejected: ", ""),
+                                    'url': page['url']
+                                })
+                            else:
+                                errors.append(f"{page['title']}: {error}")
                             continue
                         
                         if content:
@@ -318,11 +491,42 @@ class DocsExporter:
                                 content = self.compress_content(content)
                             combined_content.append(content)
         
-        return '\n'.join(combined_content), errors
+        return '\n'.join(combined_content), errors, rejections
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/progress/<progress_id>')
+def progress_stream(progress_id):
+    """Server-Sent Events endpoint for real-time progress updates"""
+    def event_stream():
+        while True:
+            with progress_lock:
+                if progress_id in progress_data:
+                    data = progress_data[progress_id]
+                    yield f"data: {json.dumps(data)}\n\n"
+                    
+                    # Clean up completed progress
+                    if data.get('finished', False):
+                        # Keep data for a bit longer so result page can access it
+                        break
+                else:
+                    yield f"data: {json.dumps({'error': 'Progress not found'})}\n\n"
+                    break
+            time.sleep(0.5)  # Update every 500ms
+    
+    return Response(event_stream(), mimetype="text/event-stream", headers={
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*'
+    })
+
+@app.route('/exporting')
+def exporting():
+    """Show the exporting progress page"""
+    progress_id = request.args.get('progress_id', '')
+    return render_template('exporting.html', progress_id=progress_id)
 
 @app.route('/scanning')
 def scanning():
@@ -363,23 +567,140 @@ def export():
         flash('Please select at least one page')
         return redirect(url_for('scan'))
     
-    exporter = DocsExporter(base_url)
+    # Generate unique progress ID
+    progress_id = str(uuid.uuid4())
     
-    # Run async function in event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        combined_content, errors = loop.run_until_complete(
-            exporter.export_selected_pages_async(selected_urls, compress_links)
+    # Initialize progress tracking
+    with progress_lock:
+        progress_data[progress_id] = {
+            'completed': 0,
+            'total': len(selected_urls),
+            'message': 'Initializing...',
+            'finished': False,
+            'errors': [],
+            'content': None
+        }
+    
+    # Start export in background thread for maximum speed
+    def run_export():
+        # Use optimized settings for maximum speed
+        exporter = DocsExporter(
+            base_url, 
+            max_concurrent_requests=15,  # High concurrency
+            delay_between_requests=0.1   # Minimal delay
         )
-    finally:
-        loop.close()
+        
+        # Set progress callback
+        def update_progress(completed, total, message):
+            with progress_lock:
+                if progress_id in progress_data:
+                    progress_data[progress_id].update({
+                        'completed': completed,
+                        'total': total,
+                        'message': message
+                    })
+        
+        exporter.set_progress_callback(update_progress)
+        
+        # Run async function in event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            combined_content, errors, rejections = loop.run_until_complete(
+                exporter.export_selected_pages_async(selected_urls, compress_links)
+            )
+            
+            # Update final progress
+            with progress_lock:
+                if progress_id in progress_data:
+                    progress_data[progress_id].update({
+                        'completed': len(selected_urls),
+                        'total': len(selected_urls),
+                        'message': 'Export completed!',
+                        'finished': True,
+                        'errors': errors,
+                        'rejections': rejections,
+                        'content': combined_content
+                    })
+        except Exception as e:
+            with progress_lock:
+                if progress_id in progress_data:
+                    progress_data[progress_id].update({
+                        'message': f'Error: {str(e)}',
+                        'finished': True,
+                        'errors': [str(e)]
+                    })
+        finally:
+            loop.close()
+    
+    # Start background thread
+    thread = threading.Thread(target=run_export)
+    thread.daemon = True
+    thread.start()
+    
+    # Redirect to progress page
+    return redirect(url_for('exporting', progress_id=progress_id))
+
+@app.route('/result/<progress_id>')
+def result(progress_id):
+    """Show results after export completion"""
+    with progress_lock:
+        if progress_id not in progress_data:
+            flash('Export session not found')
+            return redirect(url_for('index'))
+        
+        data = progress_data[progress_id]
+        if not data.get('finished', False):
+            return redirect(url_for('exporting', progress_id=progress_id))
+        
+        # Get results and clean up
+        content = data.get('content')
+        errors = data.get('errors', [])
+        rejections = data.get('rejections', [])
+        
+        # Clean up progress data
+        del progress_data[progress_id]
     
     if errors:
         for error in errors:
             flash(error)
     
-    return render_template('result.html', content=combined_content, errors=errors)
+    return render_template('result.html', content=content, errors=errors, rejections=rejections)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    import sys
+    
+    # Check for command line arguments for rate limiting configuration
+    if len(sys.argv) > 1 and sys.argv[1] == '--help':
+        print("""
+Docs Exporter - High-Speed Documentation Export
+
+The app is now optimized for maximum speed while avoiding rate limits:
+
+Default settings (optimized for speed):
+- Max concurrent requests: 15 (high concurrency)
+- Delay between requests: 0.1 seconds (minimal delay)
+- Retry attempts: 3 with fast exponential backoff
+- No batching: All requests processed simultaneously
+- Adaptive rate limiting: Automatically slows down if rate limited
+
+Performance target: 70 pages in under 20 seconds
+
+Features:
+1. Real-time progress tracking in web UI
+2. Server-Sent Events for live updates
+3. Adaptive delay adjustment
+4. High-speed concurrent processing
+5. Smart retry logic
+
+To run: python app.py
+        """)
+        sys.exit(0)
+    
+    print("Starting High-Speed Docs Exporter...")
+    print("- Target: 70 pages in under 20 seconds")
+    print("- Max concurrent requests: 15")
+    print("- Minimal delays with adaptive adjustment")
+    print("- Real-time progress tracking enabled")
+    
+    app.run(debug=True, threaded=True)

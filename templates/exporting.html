@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exporting Documentation - Docs Exporter</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #2a1a2a 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* Depth layers */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.1) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.08) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: -1;
+        }
+        
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 3rem;
+            max-width: 500px;
+            position: relative;
+            min-width: 400px;
+        }
+        
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 300;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+        
+        .progress-container {
+            margin: 2rem 0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }
+        
+        .progress-text {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            opacity: 0.9;
+        }
+        
+        .progress-details {
+            font-size: 0.9rem;
+            opacity: 0.7;
+            margin-bottom: 1rem;
+        }
+        
+        .current-page {
+            font-size: 0.85rem;
+            opacity: 0.6;
+            font-style: italic;
+            margin-top: 1rem;
+            min-height: 1.2rem;
+        }
+        
+        .speed-info {
+            font-size: 0.8rem;
+            opacity: 0.5;
+            margin-top: 1rem;
+            padding: 0.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #667eea;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 0.5rem;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error {
+            color: #ff6b6b;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: rgba(255, 107, 107, 0.1);
+            border-radius: 4px;
+            border: 1px solid rgba(255, 107, 107, 0.3);
+        }
+        
+        .complete {
+            color: #51cf66;
+            font-weight: 500;
+        }
+        
+        .complete-button {
+            background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 1rem;
+            transition: transform 0.2s ease;
+        }
+        
+        .complete-button:hover {
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Exporting Documentation</h1>
+        
+        <div class="progress-container">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            
+            <div class="progress-text" id="progressText">
+                <span class="spinner"></span>
+                Initializing export...
+            </div>
+            
+            <div class="progress-details" id="progressDetails">
+                Preparing to fetch pages...
+            </div>
+            
+            <div class="current-page" id="currentPage"></div>
+            
+            <div class="speed-info">
+                Using 15 concurrent requests with adaptive rate limiting for maximum speed
+            </div>
+        </div>
+        
+        <div id="errorContainer"></div>
+        <div id="completeContainer"></div>
+    </div>
+
+    <script>
+        const progressId = '{{ progress_id }}';
+        let startTime = Date.now();
+        let completedPages = 0;
+        
+        function updateProgress(data) {
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            const progressDetails = document.getElementById('progressDetails');
+            const currentPage = document.getElementById('currentPage');
+            const errorContainer = document.getElementById('errorContainer');
+            const completeContainer = document.getElementById('completeContainer');
+            
+            // Update progress bar
+            const percentage = data.total > 0 ? (data.completed / data.total) * 100 : 0;
+            progressFill.style.width = percentage + '%';
+            
+            // Calculate speed
+            const elapsed = (Date.now() - startTime) / 1000;
+            const rate = data.completed / elapsed;
+            const eta = data.total > data.completed ? (data.total - data.completed) / rate : 0;
+            
+            if (data.finished) {
+                if (data.errors && data.errors.length > 0) {
+                    progressText.innerHTML = '<span class="error">Export completed with errors</span>';
+                    errorContainer.innerHTML = '<div class="error">Errors: ' + data.errors.join(', ') + '</div>';
+                } else {
+                    progressText.innerHTML = '<span class="complete">✓ Export completed successfully!</span>';
+                }
+                progressDetails.textContent = `Completed ${data.completed}/${data.total} pages in ${elapsed.toFixed(1)}s`;
+                currentPage.textContent = '';
+                
+                // Show results button
+                completeContainer.innerHTML = '<a href="/result/' + progressId + '" class="complete-button">View Results</a>';
+            } else {
+                progressText.innerHTML = '<span class="spinner"></span>' + data.message;
+                progressDetails.textContent = `${data.completed}/${data.total} pages (${rate.toFixed(1)} pages/sec, ETA: ${eta.toFixed(0)}s)`;
+                
+                // Show current page being processed
+                if (data.message && data.message.startsWith('Completed ')) {
+                    currentPage.textContent = data.message;
+                }
+            }
+        }
+        
+        // Start listening to progress updates
+        const eventSource = new EventSource('/progress/' + progressId);
+        
+        eventSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                updateProgress(data);
+                
+                if (data.finished) {
+                    eventSource.close();
+                }
+            } catch (e) {
+                console.error('Error parsing progress data:', e);
+            }
+        };
+        
+        eventSource.onerror = function(event) {
+            console.error('Progress stream error:', event);
+            document.getElementById('progressText').innerHTML = '<span class="error">Connection error</span>';
+        };
+        
+        // Handle page visibility change
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>
