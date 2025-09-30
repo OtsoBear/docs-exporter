@@ -36,34 +36,33 @@
         .container {
             text-align: center;
             background: rgba(255, 255, 255, 0.08);
-            border-radius: 8px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            padding: 3rem;
-            max-width: 500px;
+            border-radius: 6px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            max-width: 350px;
             position: relative;
-            min-width: 400px;
+            min-width: 300px;
         }
         
         h1 {
-            font-size: 1.8rem;
-            font-weight: 300;
-            margin-bottom: 2rem;
+            font-size: 1.4rem;
+            font-weight: 400;
+            margin-bottom: 1.5rem;
             opacity: 0.9;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
         }
         
         .progress-container {
-            margin: 2rem 0;
+            margin: 1.5rem 0;
         }
         
         .progress-bar {
             width: 100%;
-            height: 8px;
+            height: 6px;
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
+            border-radius: 3px;
             overflow: hidden;
             margin-bottom: 1rem;
         }
@@ -73,27 +72,27 @@
             background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
             width: 0%;
             transition: width 0.3s ease;
-            border-radius: 4px;
+            border-radius: 3px;
         }
         
         .progress-text {
-            font-size: 1.1rem;
+            font-size: 0.95rem;
             margin-bottom: 0.5rem;
             opacity: 0.9;
         }
         
         .progress-details {
-            font-size: 0.9rem;
-            opacity: 0.7;
-            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            opacity: 0.6;
+            margin-bottom: 0.5rem;
         }
         
         .current-page {
-            font-size: 0.85rem;
-            opacity: 0.6;
+            font-size: 0.75rem;
+            opacity: 0.5;
             font-style: italic;
-            margin-top: 1rem;
-            min-height: 1.2rem;
+            margin-top: 0.5rem;
+            min-height: 1rem;
         }
         
         .speed-info {
@@ -107,8 +106,8 @@
         
         .spinner {
             display: inline-block;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             border-top-color: #667eea;
@@ -122,35 +121,16 @@
         
         .error {
             color: #ff6b6b;
-            margin-top: 1rem;
-            padding: 1rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
             background: rgba(255, 107, 107, 0.1);
-            border-radius: 4px;
-            border: 1px solid rgba(255, 107, 107, 0.3);
+            border-radius: 3px;
+            font-size: 0.8rem;
         }
         
         .complete {
             color: #51cf66;
             font-weight: 500;
-        }
-        
-        .complete-button {
-            background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
-            color: white;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 4px;
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            margin-top: 1rem;
-            transition: transform 0.2s ease;
-        }
-        
-        .complete-button:hover {
-            transform: translateY(-1px);
         }
     </style>
 </head>
@@ -173,10 +153,6 @@
             </div>
             
             <div class="current-page" id="currentPage"></div>
-            
-            <div class="speed-info">
-                Using 15 concurrent requests with adaptive rate limiting for maximum speed
-            </div>
         </div>
         
         <div id="errorContainer"></div>
@@ -215,8 +191,10 @@
                 progressDetails.textContent = `Completed ${data.completed}/${data.total} pages in ${elapsed.toFixed(1)}s`;
                 currentPage.textContent = '';
                 
-                // Show results button
-                completeContainer.innerHTML = '<a href="/result/' + progressId + '" class="complete-button">View Results</a>';
+                // Auto-redirect to results after 1 second
+                setTimeout(() => {
+                    window.location.href = '/result/' + progressId;
+                }, 1000);
             } else {
                 progressText.innerHTML = '<span class="spinner"></span>' + data.message;
                 progressDetails.textContent = `${data.completed}/${data.total} pages (${rate.toFixed(1)} pages/sec, ETA: ${eta.toFixed(0)}s)`;

@@ -49,16 +49,37 @@
             background: rgba(255, 255, 255, 0.08);
             border-radius: 8px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
             border: 1px solid rgba(255, 255, 255, 0.15);
             padding: 2rem;
-            margin-bottom: 2rem;
             position: relative;
-            transform: translateZ(0);
         }
         
-        .form-group::before {
+        .test-options {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .test-btn {
+            background: rgba(103, 126, 234, 0.2);
+            border: 1px solid rgba(103, 126, 234, 0.3);
+            color: rgba(255, 255, 255, 0.8);
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+        
+        .test-btn:hover {
+            background: rgba(103, 126, 234, 0.3);
+            color: rgba(255, 255, 255, 1);
+            transform: translateY(-1px);
+        }        .form-group::before {
             content: '';
             position: absolute;
             top: 0;
@@ -251,8 +272,14 @@
         {% endwith %}
         
         <div class="form-group">
+            <div class="test-options">
+                <span style="font-size: 0.8rem; opacity: 0.6; margin-right: 0.5rem;">Try:</span>
+                <button type="button" class="test-btn" onclick="fillUrl('https://docs.anthropic.com/en/docs')">Claude Docs</button>
+                <button type="button" class="test-btn" onclick="fillUrl('https://www.tensorzero.com/docs')">TensorZero</button>
+            </div>
+            
             <form method="GET" action="{{ url_for('scanning') }}">
-                <input type="url" name="url" placeholder="https://www.tensorzero.com/docs" required>
+                <input type="url" name="url" id="urlInput" placeholder="https://docs.anthropic.com/en/docs" required>
                 <div class="example">
                     Enter any Mintlif<span class="mintlify-info">y<span class="info-icon">?
                             <div class="tooltip">
@@ -271,6 +298,12 @@
                 <button type="submit">Scan Documentation</button>
             </form>
         </div>
+        
+        <script>
+            function fillUrl(url) {
+                document.getElementById('urlInput').value = url;
+            }
+        </script>
         
         <div class="info">
             <h3>How it works</h3>
