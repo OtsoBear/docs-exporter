@@ -250,7 +250,7 @@
         <div class="controls">
             <button onclick="copyToClipboard()">Copy</button>
             <button onclick="downloadFile()">Download</button>
-            <a href="{{ url_for('index') }}">New Export</a>
+            <a href="{{ url_for('docs_exporter.index') }}">New Export</a>
         </div>
         
         <div class="content-area">
@@ -261,7 +261,7 @@
             No content exported.
         </div>
         <div class="controls">
-            <a href="{{ url_for('index') }}">Try Again</a>
+            <a href="{{ url_for('docs_exporter.index') }}">Try Again</a>
         </div>
     {% endif %}
     

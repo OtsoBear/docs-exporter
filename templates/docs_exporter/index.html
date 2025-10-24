@@ -278,7 +278,7 @@
                 <button type="button" class="test-btn" onclick="fillUrl('https://www.tensorzero.com/docs')">TensorZero</button>
             </div>
             
-            <form method="GET" action="{{ url_for('scanning') }}">
+            <form method="GET" action="{{ url_for('docs_exporter.scanning') }}">
                 <input type="url" name="url" id="urlInput" placeholder="https://docs.anthropic.com/en/docs" required>
                 <div class="example">
                     Enter any Mintlif<span class="mintlify-info">y<span class="info-icon">?
