@@ -216,6 +216,29 @@
         .rejections-toggle.hidden {
             display: none;
         }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: rgba(10, 10, 20, 0.95);
+            border: 1px solid rgba(160, 160, 255, 0.4);
+            border-radius: 6px;
+            padding: 0.75rem 1.5rem;
+            color: #fff;
+            font-size: 0.9rem;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            z-index: 10000;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+        
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -266,20 +289,32 @@
     {% endif %}
     
     <script>
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => toast.classList.add('show'), 10);
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => document.body.removeChild(toast), 300);
+            }, 2000);
+        }
+        
         function copyToClipboard() {
             const textarea = document.getElementById('content');
             textarea.select();
-            textarea.setSelectionRange(0, 99999999); // For mobile devices
+            textarea.setSelectionRange(0, 99999999);
             
             try {
                 document.execCommand('copy');
-                alert('Content copied to clipboard!');
+                showToast('✓ Copied to clipboard');
             } catch (err) {
-                // Fallback to newer API
                 navigator.clipboard.writeText(textarea.value).then(() => {
-                    alert('Content copied to clipboard!');
+                    showToast('✓ Copied to clipboard');
                 }).catch(() => {
-                    alert('Failed to copy content. Please select all (Cmd+A) and copy manually.');
+                    showToast('✗ Failed to copy');
                 });
             }
         }
