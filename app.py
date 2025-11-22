@@ -1,4 +1,5 @@
 import requests
+from collections import OrderedDict
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, session
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
@@ -177,6 +178,9 @@ class DocsExporter:
         # Find the sidebar navigation
         sidebar = soup.find('div', id='sidebar-content')
         if not sidebar:
+            fallback_nav = self._extract_links_from_page(soup)
+            if fallback_nav:
+                return fallback_nav, None
             return None, "Pages that don't exist"
             
         pages = []
@@ -219,6 +223,106 @@ class DocsExporter:
                 })
         
         return pages, None
+
+    def _extract_links_from_page(self, soup):
+        """Fallback parser that inspects anchor tags when sidebar layout is unknown."""
+        # Prefer obvious sidebar navigation containers when present (keeps footer/header links out)
+        anchors = []
+        sidebar_selectors = [
+            'ul.nextra-menu-desktop',      # Nextra (e.g. Langfuse docs)
+            'ul.theme-doc-sidebar-menu',   # Docusaurus
+        ]
+
+        for selector in sidebar_selectors:
+            for container in soup.select(selector):
+                anchors.extend(container.find_all('a', href=True))
+
+        # Fallback to all anchors if we couldn't detect a sidebar
+        if not anchors:
+            anchors = soup.find_all('a', href=True)
+
+        if not anchors:
+            return None
+
+        docs_links = []
+        seen_urls = set()
+
+        for anchor in anchors:
+            title = anchor.get_text(strip=True)
+            href = anchor['href'].strip()
+
+            if not title or not href:
+                continue
+
+            if href.startswith(('#', 'mailto:', 'tel:', 'javascript:')):
+                continue
+
+            normalized_url = urljoin(self.base_url + '/', href)
+            parsed = urlparse(normalized_url)
+
+            # Restrict to same domain
+            if parsed.netloc and parsed.netloc != self.domain:
+                continue
+
+            if not self._is_docs_path(parsed.path):
+                continue
+
+            if normalized_url in seen_urls:
+                continue
+
+            seen_urls.add(normalized_url)
+            docs_links.append((parsed.path, normalized_url, title))
+
+        if not docs_links:
+            return None
+
+        groups = OrderedDict()
+        for path, url, title in docs_links:
+            group_name = self._derive_group_name(path)
+            groups.setdefault(group_name, [])
+
+            groups[group_name].append({
+                'title': title,
+                'url': url,
+                'path': path
+            })
+
+        return [{'group': group, 'pages': pages} for group, pages in groups.items()] or None
+
+    def _is_docs_path(self, path):
+        """Check if the path appears to belong to the documentation tree."""
+        if not path:
+            return False
+
+        normalized_path = path.rstrip('/')
+
+        if self.base_path and self.base_path != '/' and normalized_path.startswith(self.base_path):
+            return True
+
+        return '/docs' in normalized_path.lower()
+
+    def _derive_group_name(self, path):
+        """Best-effort grouping based on first segment after the docs prefix."""
+        base_segments = [segment for segment in self.base_path.split('/') if segment]
+        path_segments = [segment for segment in path.split('/') if segment]
+
+        remaining = path_segments[len(base_segments):] if len(path_segments) >= len(base_segments) else path_segments
+
+        if not remaining:
+            return 'Documentation'
+
+        group = remaining[0]
+        group = group.replace('-', ' ').replace('_', ' ').strip().title()
+
+        return group or 'Documentation'
+
+    def _build_md_url(self, url):
+        """Return the markdown endpoint for a docs URL."""
+        base_url = url.split('#', 1)[0]
+        normalized = base_url.rstrip('/')
+        if normalized.endswith('.md'):
+            return normalized
+        return f"{normalized}.md"
     
     async def fetch_markdown_content_async(self, session, url, max_retries=3):
         """Fetch markdown content with adaptive rate limiting for maximum speed"""
@@ -237,11 +341,8 @@ class DocsExporter:
                             return None, f"External URL rejected: {result}"
                         return result, None
                     
-                    # For internal URLs, use the original logic
-                    if url.endswith('/'):
-                        md_url = url + '.md'
-                    else:
-                        md_url = url + '/.md'
+                    # For internal URLs, fetch the underlying markdown file
+                    md_url = self._build_md_url(url)
                     
                     async with session.get(md_url, timeout=10) as response:
                         if response.status == 404:
