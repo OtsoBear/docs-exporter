@@ -129,10 +129,16 @@
                 form.action = '/scan';
                 form.style.display = 'none';
                 
-                const input = document.createElement('input');
-                input.name = 'url';
-                input.value = decodeURIComponent(url);
-                form.appendChild(input);
+                const urlInput = document.createElement('input');
+                urlInput.name = 'url';
+                urlInput.value = decodeURIComponent(url);
+                form.appendChild(urlInput);
+                
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrf_token';
+                csrfInput.value = '{{ csrf_token() }}';
+                form.appendChild(csrfInput);
                 
                 document.body.appendChild(form);
                 form.submit();

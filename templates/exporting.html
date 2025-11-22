@@ -45,6 +45,9 @@
             max-width: 350px;
             position: relative;
             min-width: 300px;
+            min-height: 320px;
+            display: flex;
+            flex-direction: column;
         }
         
         h1 {
@@ -79,12 +82,17 @@
             font-size: 0.95rem;
             margin-bottom: 0.5rem;
             opacity: 0.9;
+            min-height: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .progress-details {
             font-size: 0.8rem;
             opacity: 0.6;
             margin-bottom: 0.5rem;
+            min-height: 1.2rem;
         }
         
         .current-page {
@@ -92,7 +100,10 @@
             opacity: 0.5;
             font-style: italic;
             margin-top: 0.5rem;
-            min-height: 1rem;
+            min-height: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .speed-info {
@@ -126,6 +137,7 @@
             background: rgba(255, 107, 107, 0.1);
             border-radius: 3px;
             font-size: 0.8rem;
+            min-height: 2rem;
         }
         
         .complete {

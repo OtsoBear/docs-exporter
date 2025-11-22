@@ -1,5 +1,8 @@
 import requests
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, session
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import re
@@ -9,13 +12,73 @@ import aiohttp
 import json
 import threading
 import uuid
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-here'
+app.secret_key = os.getenv('SECRET_KEY', os.urandom(24).hex())
 
-# Global progress tracking
+# Initialize CSRF protection
+csrf = CSRFProtect(app)
+
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# Global progress tracking with timestamps
 progress_data = {}
 progress_lock = threading.Lock()
+PROGRESS_EXPIRY_SECONDS = 3600  # 1 hour
+
+def cleanup_old_progress_data():
+    """Remove progress data older than PROGRESS_EXPIRY_SECONDS"""
+    with progress_lock:
+        current_time = time.time()
+        expired_keys = [
+            key for key, value in progress_data.items()
+            if current_time - value.get('timestamp', 0) > PROGRESS_EXPIRY_SECONDS
+        ]
+        for key in expired_keys:
+            del progress_data[key]
+
+def validate_url(url):
+    """Validate and sanitize URL input"""
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL"
+    
+    url = url.strip()
+    
+    # Add https if no protocol specified
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    try:
+        parsed = urlparse(url)
+        
+        # Check for valid scheme
+        if parsed.scheme not in ('http', 'https'):
+            return False, "Only HTTP and HTTPS protocols are allowed"
+        
+        # Check for valid netloc
+        if not parsed.netloc:
+            return False, "Invalid domain"
+        
+        # Block localhost and private IPs in production
+        if parsed.netloc.startswith(('localhost', '127.', '192.168.', '10.', '172.')):
+            # Allow in development
+            if not app.debug:
+                return False, "Private network URLs are not allowed"
+        
+        return True, url
+    except Exception as e:
+        return False, f"Invalid URL format: {str(e)}"
 
 class DocsExporter:
     def __init__(self, base_url, max_concurrent_requests=15, delay_between_requests=0.1):
@@ -494,7 +557,10 @@ class DocsExporter:
         return '\n'.join(combined_content), errors, rejections
 
 @app.route('/')
+@limiter.limit("30 per minute")
 def index():
+    # Clean up old progress data periodically
+    cleanup_old_progress_data()
     return render_template('index.html')
 
 @app.route('/progress/<progress_id>')
@@ -534,15 +600,19 @@ def scanning():
     return render_template('scanning.html', url=url)
 
 @app.route('/scan', methods=['POST'])
+@limiter.limit("10 per minute")
 def scan():
     url = request.form.get('url', '').strip()
     if not url:
         flash('Please enter a URL')
         return redirect(url_for('index'))
     
-    # Ensure URL starts with http/https
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
+    # Validate and sanitize URL
+    is_valid, result = validate_url(url)
+    if not is_valid:
+        flash(result)
+        return redirect(url_for('index'))
+    url = result
     
     exporter = DocsExporter(url)
     nav_structure, error = exporter.get_navigation_structure()
@@ -558,6 +628,7 @@ def scan():
     return render_template('select.html', nav_structure=nav_structure, base_url=url)
 
 @app.route('/export', methods=['POST'])
+@limiter.limit("5 per minute")
 def export():
     base_url = request.form.get('base_url')
     selected_urls = request.form.getlist('selected_pages')
@@ -567,10 +638,16 @@ def export():
         flash('Please select at least one page')
         return redirect(url_for('scan'))
     
+    # Validate base URL
+    is_valid, result = validate_url(base_url)
+    if not is_valid:
+        flash(result)
+        return redirect(url_for('index'))
+    
     # Generate unique progress ID
     progress_id = str(uuid.uuid4())
     
-    # Initialize progress tracking
+    # Initialize progress tracking with timestamp
     with progress_lock:
         progress_data[progress_id] = {
             'completed': 0,
@@ -578,7 +655,8 @@ def export():
             'message': 'Initializing...',
             'finished': False,
             'errors': [],
-            'content': None
+            'content': None,
+            'timestamp': time.time()
         }
     
     # Start export in background thread for maximum speed
