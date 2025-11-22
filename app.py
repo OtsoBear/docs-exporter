@@ -1,5 +1,9 @@
 import requests
+from collections import OrderedDict
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, session
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import re
@@ -9,13 +13,73 @@ import aiohttp
 import json
 import threading
 import uuid
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-here'
+app.secret_key = os.getenv('SECRET_KEY', os.urandom(24).hex())
 
-# Global progress tracking
+# Initialize CSRF protection
+csrf = CSRFProtect(app)
+
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# Global progress tracking with timestamps
 progress_data = {}
 progress_lock = threading.Lock()
+PROGRESS_EXPIRY_SECONDS = 3600  # 1 hour
+
+def cleanup_old_progress_data():
+    """Remove progress data older than PROGRESS_EXPIRY_SECONDS"""
+    with progress_lock:
+        current_time = time.time()
+        expired_keys = [
+            key for key, value in progress_data.items()
+            if current_time - value.get('timestamp', 0) > PROGRESS_EXPIRY_SECONDS
+        ]
+        for key in expired_keys:
+            del progress_data[key]
+
+def validate_url(url):
+    """Validate and sanitize URL input"""
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL"
+    
+    url = url.strip()
+    
+    # Add https if no protocol specified
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    try:
+        parsed = urlparse(url)
+        
+        # Check for valid scheme
+        if parsed.scheme not in ('http', 'https'):
+            return False, "Only HTTP and HTTPS protocols are allowed"
+        
+        # Check for valid netloc
+        if not parsed.netloc:
+            return False, "Invalid domain"
+        
+        # Block localhost and private IPs in production
+        if parsed.netloc.startswith(('localhost', '127.', '192.168.', '10.', '172.')):
+            # Allow in development
+            if not app.debug:
+                return False, "Private network URLs are not allowed"
+        
+        return True, url
+    except Exception as e:
+        return False, f"Invalid URL format: {str(e)}"
 
 class DocsExporter:
     def __init__(self, base_url, max_concurrent_requests=15, delay_between_requests=0.1):
@@ -114,6 +178,9 @@ class DocsExporter:
         # Find the sidebar navigation
         sidebar = soup.find('div', id='sidebar-content')
         if not sidebar:
+            fallback_nav = self._extract_links_from_page(soup)
+            if fallback_nav:
+                return fallback_nav, None
             return None, "Pages that don't exist"
             
         pages = []
@@ -156,6 +223,106 @@ class DocsExporter:
                 })
         
         return pages, None
+
+    def _extract_links_from_page(self, soup):
+        """Fallback parser that inspects anchor tags when sidebar layout is unknown."""
+        # Prefer obvious sidebar navigation containers when present (keeps footer/header links out)
+        anchors = []
+        sidebar_selectors = [
+            'ul.nextra-menu-desktop',      # Nextra (e.g. Langfuse docs)
+            'ul.theme-doc-sidebar-menu',   # Docusaurus
+        ]
+
+        for selector in sidebar_selectors:
+            for container in soup.select(selector):
+                anchors.extend(container.find_all('a', href=True))
+
+        # Fallback to all anchors if we couldn't detect a sidebar
+        if not anchors:
+            anchors = soup.find_all('a', href=True)
+
+        if not anchors:
+            return None
+
+        docs_links = []
+        seen_urls = set()
+
+        for anchor in anchors:
+            title = anchor.get_text(strip=True)
+            href = anchor['href'].strip()
+
+            if not title or not href:
+                continue
+
+            if href.startswith(('#', 'mailto:', 'tel:', 'javascript:')):
+                continue
+
+            normalized_url = urljoin(self.base_url + '/', href)
+            parsed = urlparse(normalized_url)
+
+            # Restrict to same domain
+            if parsed.netloc and parsed.netloc != self.domain:
+                continue
+
+            if not self._is_docs_path(parsed.path):
+                continue
+
+            if normalized_url in seen_urls:
+                continue
+
+            seen_urls.add(normalized_url)
+            docs_links.append((parsed.path, normalized_url, title))
+
+        if not docs_links:
+            return None
+
+        groups = OrderedDict()
+        for path, url, title in docs_links:
+            group_name = self._derive_group_name(path)
+            groups.setdefault(group_name, [])
+
+            groups[group_name].append({
+                'title': title,
+                'url': url,
+                'path': path
+            })
+
+        return [{'group': group, 'pages': pages} for group, pages in groups.items()] or None
+
+    def _is_docs_path(self, path):
+        """Check if the path appears to belong to the documentation tree."""
+        if not path:
+            return False
+
+        normalized_path = path.rstrip('/')
+
+        if self.base_path and self.base_path != '/' and normalized_path.startswith(self.base_path):
+            return True
+
+        return '/docs' in normalized_path.lower()
+
+    def _derive_group_name(self, path):
+        """Best-effort grouping based on first segment after the docs prefix."""
+        base_segments = [segment for segment in self.base_path.split('/') if segment]
+        path_segments = [segment for segment in path.split('/') if segment]
+
+        remaining = path_segments[len(base_segments):] if len(path_segments) >= len(base_segments) else path_segments
+
+        if not remaining:
+            return 'Documentation'
+
+        group = remaining[0]
+        group = group.replace('-', ' ').replace('_', ' ').strip().title()
+
+        return group or 'Documentation'
+
+    def _build_md_url(self, url):
+        """Return the markdown endpoint for a docs URL."""
+        base_url = url.split('#', 1)[0]
+        normalized = base_url.rstrip('/')
+        if normalized.endswith('.md'):
+            return normalized
+        return f"{normalized}.md"
     
     async def fetch_markdown_content_async(self, session, url, max_retries=3):
         """Fetch markdown content with adaptive rate limiting for maximum speed"""
@@ -174,11 +341,8 @@ class DocsExporter:
                             return None, f"External URL rejected: {result}"
                         return result, None
                     
-                    # For internal URLs, use the original logic
-                    if url.endswith('/'):
-                        md_url = url + '.md'
-                    else:
-                        md_url = url + '/.md'
+                    # For internal URLs, fetch the underlying markdown file
+                    md_url = self._build_md_url(url)
                     
                     async with session.get(md_url, timeout=10) as response:
                         if response.status == 404:
@@ -494,7 +658,10 @@ class DocsExporter:
         return '\n'.join(combined_content), errors, rejections
 
 @app.route('/')
+@limiter.limit("30 per minute")
 def index():
+    # Clean up old progress data periodically
+    cleanup_old_progress_data()
     return render_template('index.html')
 
 @app.route('/progress/<progress_id>')
@@ -534,15 +701,19 @@ def scanning():
     return render_template('scanning.html', url=url)
 
 @app.route('/scan', methods=['POST'])
+@limiter.limit("10 per minute")
 def scan():
     url = request.form.get('url', '').strip()
     if not url:
         flash('Please enter a URL')
         return redirect(url_for('index'))
     
-    # Ensure URL starts with http/https
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
+    # Validate and sanitize URL
+    is_valid, result = validate_url(url)
+    if not is_valid:
+        flash(result)
+        return redirect(url_for('index'))
+    url = result
     
     exporter = DocsExporter(url)
     nav_structure, error = exporter.get_navigation_structure()
@@ -558,6 +729,7 @@ def scan():
     return render_template('select.html', nav_structure=nav_structure, base_url=url)
 
 @app.route('/export', methods=['POST'])
+@limiter.limit("5 per minute")
 def export():
     base_url = request.form.get('base_url')
     selected_urls = request.form.getlist('selected_pages')
@@ -567,10 +739,16 @@ def export():
         flash('Please select at least one page')
         return redirect(url_for('scan'))
     
+    # Validate base URL
+    is_valid, result = validate_url(base_url)
+    if not is_valid:
+        flash(result)
+        return redirect(url_for('index'))
+    
     # Generate unique progress ID
     progress_id = str(uuid.uuid4())
     
-    # Initialize progress tracking
+    # Initialize progress tracking with timestamp
     with progress_lock:
         progress_data[progress_id] = {
             'completed': 0,
@@ -578,7 +756,8 @@ def export():
             'message': 'Initializing...',
             'finished': False,
             'errors': [],
-            'content': None
+            'content': None,
+            'timestamp': time.time()
         }
     
     # Start export in background thread for maximum speed

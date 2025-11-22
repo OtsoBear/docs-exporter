@@ -1,241 +1,118 @@
 # Docs Exporter
 
-A powerful Python tool to extract content from websites and convert it to clean, LLM-friendly markdown format. Perfect for creating training data, documentation, or preparing web content for AI processing.
+[![Python](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Flask](https://img.shields.io/badge/flask-2.3.3-green.svg)](https://flask.palletsprojects.com/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Async](https://img.shields.io/badge/async-aiohttp-orange.svg)](https://docs.aiohttp.org/)
+
+A Flask web application for extracting large documentation sites into clean, consolidated markdown format. Designed to prepare documentation for LLM consumption and analysis.
+
+## Purpose
+
+Convert entire documentation sites into a single markdown file that can be easily provided to Large Language Models. This enables AI assistants to understand and answer questions about complex documentation without requiring multiple web requests or context switching.
 
 ## Features
 
-- 🌐 **Web Scraping**: Supports both static and dynamic content with requests and Selenium
-- 🧹 **Smart Content Extraction**: Automatically identifies main content, removes navigation/ads
-- 📝 **Clean Markdown Output**: Optimized for LLM consumption with proper formatting
-- 🔧 **Flexible CLI**: Easy-to-use command-line interface with multiple options
-- 📦 **Batch Processing**: Export multiple URLs from a file
-- 🎯 **Multiple Extraction Methods**: Choose between readability algorithm and CSS selectors
-- 📋 **Metadata Support**: Include page titles, descriptions, and other metadata
+- Automatic navigation structure detection
+- Batch export of multiple documentation pages
+- Concurrent async processing for efficiency
+- Real-time progress tracking via Server-Sent Events
+- Clean markdown output optimized for LLM input
+- Optional link compression to reduce token usage
+- Smart content extraction with code block preservation
 
 ## Installation
 
-1. Clone this repository:
+### Quick Setup (Recommended)
+
+```bash
+git clone <your-repo-url>
+cd docs-exporter
+chmod +x setup.sh
+./setup.sh
+```
+
+### Manual Setup
+
+1. **Clone the repository:**
 ```bash
 git clone <your-repo-url>
 cd docs-exporter
 ```
 
-2. Install dependencies:
+2. **Install dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
 
-3. (Optional) For Selenium support, install ChromeDriver:
+3. **Set up environment variables:**
 ```bash
-# On macOS with Homebrew
-brew install chromedriver
-
-# On Ubuntu/Debian
-sudo apt-get install chromium-chromedriver
-
-# Or download manually from https://chromedriver.chromium.org/
+cp .env.example .env
+# Edit .env and set your SECRET_KEY
+# Or generate one: python -c "import os; print(os.urandom(24).hex())"
 ```
 
-## Quick Start
+## Usage
 
-### Command Line Usage
-
-Export a single URL:
+1. Start the server:
 ```bash
-python main.py export https://www.tensorzero.com/docs
+python app.py
 ```
 
-Export with custom options:
-```bash
-python main.py export https://example.com \
-  --output my_docs.md \
-  --use-selenium \
-  --extraction-method readability \
-  --verbose
-```
+2. Navigate to `http://localhost:5000`
 
-Batch export from a file:
-```bash
-# Create a file with URLs (one per line)
-echo "https://www.tensorzero.com/docs" > urls.txt
-echo "https://example.com/article" >> urls.txt
+3. Enter a documentation URL (e.g., `https://example.com/docs`)
 
-python main.py batch urls.txt --output-dir ./exported
-```
+4. Select which pages to include in the export
 
-Copy to clipboard instead of saving:
-```bash
-python main.py export https://example.com --copy-to-clipboard
-```
-
-### Programmatic Usage
-
-```python
-from docs_exporter import DocsExporter, export_url_to_markdown
-
-# Quick export
-markdown = export_url_to_markdown("https://example.com")
-print(markdown)
-
-# Advanced usage
-with DocsExporter(use_selenium=True, verbose=True) as exporter:
-    markdown = exporter.export_url("https://example.com")
-    if markdown:
-        with open("output.md", "w") as f:
-            f.write(markdown)
-```
-
-## CLI Commands
-
-### `export` - Export a single URL
-
-```bash
-python main.py export [OPTIONS] URL
-```
-
-**Options:**
-- `--output, -o`: Output file path
-- `--output-dir, -d`: Output directory (default: current directory)
-- `--use-selenium`: Force use of Selenium for dynamic content
-- `--no-metadata`: Skip including metadata in output
-- `--extraction-method`: Method to use (`auto`, `readability`, `selectors`)
-- `--verbose, -v`: Enable verbose logging
-- `--copy-to-clipboard, -c`: Copy to clipboard instead of saving
-
-### `batch` - Export multiple URLs
-
-```bash
-python main.py batch [OPTIONS] URLS_FILE
-```
-
-**Options:**
-- `--output-dir, -d`: Output directory for exported files
-- `--use-selenium`: Force use of Selenium for dynamic content
-- `--no-metadata`: Skip including metadata in output
-- `--extraction-method`: Method to use (`auto`, `readability`, `selectors`)
-- `--verbose, -v`: Enable verbose logging
-- `--delay`: Delay between requests in seconds (default: 1.0)
-
-## Extraction Methods
-
-1. **Auto (default)**: Tries CSS selectors first, falls back to readability
-2. **Readability**: Uses Mozilla's readability algorithm for content extraction
-3. **Selectors**: Uses CSS selectors to find main content areas
+5. Download the consolidated markdown file
 
 ## Configuration
 
-The tool automatically detects content using:
+Default settings in [`app.py`](app.py:21):
+- Max concurrent requests: 15
+- Request delay: 0.1 seconds with adaptive adjustment
+- Retry attempts: 3 with exponential backoff
+- Connection timeout: 5 seconds
+- Total timeout: 30 seconds
 
-- Common content selectors (`main`, `article`, `.content`, etc.)
-- Readability algorithm for content scoring
-- Automatic removal of navigation, ads, and other non-content elements
+## API Endpoints
 
-## Examples
+- `GET /` - Main interface
+- `POST /scan` - Scan documentation site for available pages
+- `POST /export` - Initiate export job
+- `GET /progress/<id>` - Server-Sent Events progress stream
+- `GET /result/<id>` - Retrieve export results
 
-### Export TensorZero Documentation
-```bash
-python main.py export https://www.tensorzero.com/docs \
-  --output tensorzero-docs.md \
-  --extraction-method auto
-```
+## Security Features
 
-### Batch Export Multiple Documentation Pages
-```bash
-# Create urls.txt with:
-# https://www.tensorzero.com/docs
-# https://www.tensorzero.com/docs/quickstart
-# https://www.tensorzero.com/docs/gateway
-
-python main.py batch urls.txt \
-  --output-dir ./tensorzero-docs \
-  --delay 2.0
-```
-
-### Export JavaScript-Heavy Site
-```bash
-python main.py export https://spa-website.com \
-  --use-selenium \
-  --verbose
-```
-
-## Output Format
-
-The tool generates clean markdown with:
-
-- Document metadata (title, description, source URL)
-- Properly formatted headings, lists, and code blocks
-- Tables converted to markdown format
-- Images with alt text preserved
-- Links with descriptive text
-
-Example output:
-```markdown
-# Page Title
-
-**Source:** https://example.com
-**Description:** Page description here
-
----
-
-## Main Content
-
-This is the main content of the page...
-
-### Code Example
-
-```python
-def hello_world():
-    print("Hello, World!")
-```
-
-## Summary
-
-Key points from the article...
-```
-
-## Troubleshooting
-
-### Chrome Driver Issues
-If you encounter Selenium/ChromeDriver issues:
-1. Ensure ChromeDriver is installed and in PATH
-2. Update Chrome browser to latest version
-3. Use `--use-selenium` only when necessary
-
-### Content Not Extracted
-If content isn't being extracted properly:
-1. Try different extraction methods (`--extraction-method`)
-2. Use `--verbose` to see detailed logs
-3. For JavaScript-heavy sites, use `--use-selenium`
-
-### Performance
-For better performance:
-- Use requests (default) instead of Selenium when possible
-- Increase `--delay` for batch operations to be respectful to servers
-- Use `--no-metadata` to skip metadata extraction
-
-## Development
-
-The project structure:
-```
-docs_exporter/
-├── __init__.py          # Package initialization
-├── scraper.py           # Web scraping functionality
-├── extractor.py         # Content extraction logic
-├── converter.py         # HTML to Markdown conversion
-├── cli.py              # Command-line interface
-└── exporter.py         # Main API class
-```
+- CSRF protection on all forms
+- Rate limiting per endpoint (30/min for main page, 10/min for scan, 5/min for export)
+- URL validation and sanitization
+- Environment-based secret key management
+- Automatic cleanup of expired session data
 
 ## Dependencies
 
-- `requests`: HTTP requests
-- `beautifulsoup4`: HTML parsing
-- `selenium`: Dynamic content scraping
-- `markdownify`: HTML to Markdown conversion
-- `click`: CLI framework
-- `lxml`: XML/HTML processing
-- `readability-lxml`: Content extraction algorithm
+- Flask - Web framework
+- Flask-WTF - CSRF protection
+- Flask-Limiter - Rate limiting
+- aiohttp - Async HTTP client for concurrent requests
+- BeautifulSoup4 - HTML parsing
+- requests - HTTP requests
+- python-dotenv - Environment variable management
+
+## Output Format
+
+Generated markdown includes:
+- Document metadata (titles, URLs)
+- Properly formatted headings and hierarchy
+- Preserved code blocks
+- Converted tables
+- Link references
+
+Ideal for providing comprehensive context to LLMs without manually copying documentation.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License
