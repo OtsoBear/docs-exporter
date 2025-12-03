@@ -1,7 +1,6 @@
 import requests
 from collections import OrderedDict
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, session
-from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from bs4 import BeautifulSoup
@@ -21,9 +20,6 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', os.urandom(24).hex())
-
-# Initialize CSRF protection
-csrf = CSRFProtect(app)
 
 # Initialize rate limiter
 limiter = Limiter(
@@ -662,7 +658,7 @@ class DocsExporter:
 def index():
     # Clean up old progress data periodically
     cleanup_old_progress_data()
-    return render_template('index.html')
+    return render_template('docs_exporter/index.html')
 
 @app.route('/progress/<progress_id>')
 def progress_stream(progress_id):
@@ -693,12 +689,12 @@ def progress_stream(progress_id):
 def exporting():
     """Show the exporting progress page"""
     progress_id = request.args.get('progress_id', '')
-    return render_template('exporting.html', progress_id=progress_id)
+    return render_template('docs_exporter/exporting.html', progress_id=progress_id)
 
 @app.route('/scanning')
 def scanning():
     url = request.args.get('url', '')
-    return render_template('scanning.html', url=url)
+    return render_template('docs_exporter/scanning.html', url=url)
 
 @app.route('/scan', methods=['POST'])
 @limiter.limit("10 per minute")
@@ -726,7 +722,7 @@ def scan():
         flash('No documentation pages found')
         return redirect(url_for('index'))
     
-    return render_template('select.html', nav_structure=nav_structure, base_url=url)
+    return render_template('docs_exporter/select.html', nav_structure=nav_structure, base_url=url)
 
 @app.route('/export', methods=['POST'])
 @limiter.limit("5 per minute")
@@ -844,7 +840,7 @@ def result(progress_id):
         for error in errors:
             flash(error)
     
-    return render_template('result.html', content=content, errors=errors, rejections=rejections)
+    return render_template('docs_exporter/result.html', content=content, errors=errors, rejections=rejections)
 
 if __name__ == '__main__':
     import sys

@@ -205,7 +205,7 @@
                 
                 // Auto-redirect to results after 1 second
                 setTimeout(() => {
-                    window.location.href = '/docs-exporter/result/' + progressId;
+                    window.location.href = '/result/' + progressId;
                 }, 1000);
             } else {
                 progressText.innerHTML = '<span class="spinner"></span>' + data.message;
@@ -219,7 +219,7 @@
         }
         
         // Start listening to progress updates
-        const eventSource = new EventSource('/docs-exporter/progress/' + progressId);
+        const eventSource = new EventSource('/progress/' + progressId);
         
         eventSource.onmessage = function(event) {
             try {
